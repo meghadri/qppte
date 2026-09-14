@@ -57,9 +57,8 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         self.working = False
         self.setAutoFillBackground(True)
         self.style = style
-        bgcolor = STYLES[self.style]["QPlainTextEdit_background_color"]
         palette = QPalette()
-        palette.setColor(QPalette.ColorRole.Window, bgcolor)
+        palette.setColor(QPalette.ColorRole.Base, STYLES[self.style]["QPlainTextEdit_background_color"])
         self.setPalette(palette)
 
         self.lock = Lock()
@@ -119,9 +118,8 @@ class QPythonPlainTextEdit(QPlainTextEdit):
     def setHighlightStyle(self, style: str) -> None:
         if self.style != style:
             self.style = style
-            bgcolor = STYLES[self.style]["QPlainTextEdit_background_color"]
             palette = QPalette()
-            palette.setColor(QPalette.ColorRole.Window, bgcolor)
+            palette.setColor(QPalette.ColorRole.Base, STYLES[self.style]["QPlainTextEdit_background_color"])
             self.setPalette(palette)
             self.setCode(self.toPlainText())
 
