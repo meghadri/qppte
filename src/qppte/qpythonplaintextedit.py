@@ -1,3 +1,5 @@
+from threading import Lock
+
 import tree_sitter_python
 from PySide6.QtGui import QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit
@@ -31,7 +33,7 @@ HIGHLIGHTER_QUERY = Query(
         ["def" "return" "if" "else" "class" "assert" "async" "await" "break" "continue" "del" "elif" 
          "else" "except" "finally" "for" "global" "lambda" "pass" "raise" "nonlocal" "return" "try" 
          "while" "yield" "as" "with" "import" "from" "match" "case"] @keyword
-         
+
         (true) @keyword
         (false) @keyword
 
@@ -50,10 +52,13 @@ HIGHLIGHTER_QUERY = Query(
 
 
 class QPythonPlainTextEdit(QPlainTextEdit):
-    def __init__(self, /):
+    def __init__(self, style: str = "default"):
         super().__init__()
         self.working = False
-        self.style = "default"
+        self.style = style
+        self.lock = Lock()
+        self.highlight_done_once = False
+        self.signal_connected = False
 
     def highlight(self) -> None:
         cursor: QTextCursor = self.textCursor()
@@ -75,20 +80,40 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                 cursor.setPosition(get_offset(node.end_point), QTextCursor.MoveMode.KeepAnchor)
                 cursor.setCharFormat(STYLES[self.style][capture_name])
 
+        self.highlight_done_once = True
+
     def rehighlight(self):
-        if not self.working:
-            self.working = True
+        with self.lock:
+            if self.working:
+                return
+            else:
+                self.working = True
+
+        try:
+            if self.isReadOnly() and self.highlight_done_once:
+                return
+
             cursor: QTextCursor = self.textCursor()
             cursor.setPosition(0)
             cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
             cursor.setCharFormat(QTextCharFormat())
             self.highlight()
+            self.highlight_done_once = True
+        finally:
             self.working = False
 
     def setCode(self, text: str) -> None:
+        self.highlight_done_once = False
         self.setPlainText(text)
         self.rehighlight()
-        self.textChanged.connect(self.rehighlight)
+        if not self.signal_connected:
+            self.textChanged.connect(self.rehighlight)
+            self.signal_connected = True
+
+    def setHighlightStyle(self, style: str) -> None:
+        if self.style != style:
+            self.style = style
+            self.setCode(self.toPlainText())
 
 
 # class TextEditorWindow(QMainWindow):
