@@ -56,6 +56,8 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         super().__init__()
         self.working = False
         self.style = style
+        bgcolor = STYLES[self.style]["QPlainTextEdit_background_color"]
+        self.setStyleSheet(f"background-color: {bgcolor};")
         self.lock = Lock()
         self.highlight_done_once = False
         self.signal_connected = False
@@ -113,6 +115,8 @@ class QPythonPlainTextEdit(QPlainTextEdit):
     def setHighlightStyle(self, style: str) -> None:
         if self.style != style:
             self.style = style
+            bgcolor = STYLES[self.style]["QPlainTextEdit_background_color"]
+            self.setStyleSheet(f"background-color: {bgcolor};")
             self.setCode(self.toPlainText())
 
 

@@ -34,6 +34,7 @@ STYLES = {
         "self": TextCharFormat(foreground_color="#94558D"),
         "type": TextCharFormat(foreground_color="#660099"),
         "class_definition_name": TextCharFormat(weight=QFont.Weight.Bold),  #
+        "QPlainTextEdit_background_color": "#ffffff",
     },
     "light_bold": {
         "function_definition": TextCharFormat(foreground_color="#00627A", weight=QFont.Weight.Bold),
@@ -47,6 +48,7 @@ STYLES = {
         "string": TextCharFormat(foreground_color="#067D17", weight=QFont.Weight.Bold),
         "self": TextCharFormat(foreground_color="#94558D", weight=QFont.Weight.Bold),
         "type": TextCharFormat(foreground_color="#660099", weight=QFont.Weight.Bold),
-        "class_definition_name": TextCharFormat(weight=QFont.Weight.Bold),  #
+        "class_definition_name": TextCharFormat(weight=QFont.Weight.Bold),
+        "QPlainTextEdit_background_color": "#ffffff",
     },
 }
