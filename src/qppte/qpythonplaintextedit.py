@@ -1,7 +1,7 @@
 from threading import Lock
 
 import tree_sitter_python
-from PySide6.QtGui import QTextCharFormat, QTextCursor
+from PySide6.QtGui import QPalette, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit
 from tree_sitter import Language, Parser, Point, Query, QueryCursor
 
@@ -55,9 +55,13 @@ class QPythonPlainTextEdit(QPlainTextEdit):
     def __init__(self, style: str = "default"):
         super().__init__()
         self.working = False
+        self.setAutoFillBackground(True)
         self.style = style
         bgcolor = STYLES[self.style]["QPlainTextEdit_background_color"]
-        self.setStyleSheet(f"background-color: {bgcolor};")
+        palette = QPalette()
+        palette.setColor(QPalette.ColorRole.Window, bgcolor)
+        self.setPalette(palette)
+
         self.lock = Lock()
         self.highlight_done_once = False
         self.signal_connected = False
@@ -116,7 +120,9 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         if self.style != style:
             self.style = style
             bgcolor = STYLES[self.style]["QPlainTextEdit_background_color"]
-            self.setStyleSheet(f"background-color: {bgcolor};")
+            palette = QPalette()
+            palette.setColor(QPalette.ColorRole.Window, bgcolor)
+            self.setPalette(palette)
             self.setCode(self.toPlainText())
 
 
