@@ -87,7 +87,7 @@ class QPythonPlainTextEdit(QPlainTextEdit):
 
     def setCode(self, text: str) -> None:
         self.setPlainText(text)
-        self.highlight()
+        self.rehighlight()
         self.textChanged.connect(self.rehighlight)
 
 
