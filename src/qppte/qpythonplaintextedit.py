@@ -30,9 +30,8 @@ HIGHLIGHTER_QUERY = Query(
 
         ["def" "return" "if" "else" "class" "assert" "async" "await" "break" "continue" "del" "elif" 
          "else" "except" "finally" "for" "global" "lambda" "pass" "raise" "nonlocal" "return" "try" 
-         "while" "yield" "as" "with" "import" "from"] @keyword
-
-
+         "while" "yield" "as" "with" "import" "from" "match" "case"] @keyword
+         
         (true) @keyword
         (false) @keyword
 
@@ -91,7 +90,6 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         self.textChanged.connect(self.rehighlight)
 
 
-#
 # class TextEditorWindow(QMainWindow):
 #     def __init__(self):
 #         super().__init__()
