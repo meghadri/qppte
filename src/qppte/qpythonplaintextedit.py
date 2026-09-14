@@ -53,6 +53,7 @@ class QPythonPlainTextEdit(QPlainTextEdit):
     def __init__(self, /):
         super().__init__()
         self.working = False
+        self.style = "default"
 
     def highlight(self) -> None:
         cursor: QTextCursor = self.textCursor()
@@ -72,7 +73,7 @@ class QPythonPlainTextEdit(QPlainTextEdit):
             for node in captures[capture_name]:
                 cursor.setPosition(get_offset(node.start_point))
                 cursor.setPosition(get_offset(node.end_point), QTextCursor.MoveMode.KeepAnchor)
-                cursor.setCharFormat(STYLES["default"][capture_name])
+                cursor.setCharFormat(STYLES[self.style][capture_name])
 
     def rehighlight(self):
         if not self.working:
