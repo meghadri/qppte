@@ -122,30 +122,3 @@ class QPythonPlainTextEdit(QPlainTextEdit):
             palette.setColor(QPalette.ColorRole.Base, STYLES[self.style]["QPlainTextEdit_background_color"])
             self.setPalette(palette)
             self.setCode(self.toPlainText())
-
-
-# class TextEditorWindow(QMainWindow):
-#     def __init__(self):
-#         super().__init__()
-#         self.setWindowTitle("Text Editor with Comment Toggle (Ctrl-/)")
-#         self.setGeometry(100, 100, 800, 600)
-#
-#         self.text_edit = QPythonPlainTextEdit()
-#         self.setCentralWidget(self.text_edit)
-#         # Add sample text
-#         sample_text = """
-# class A(object):
-#     def __init__(a: int):
-#         super().__init__()
-#         self.a = a
-#
-# """
-#
-#         self.text_edit.setCode(sample_text)
-#
-#
-# if __name__ == "__main__":
-#     app = QApplication(sys.argv)
-#     window = TextEditorWindow()
-#     window.show()
-#     sys.exit(app.exec())
