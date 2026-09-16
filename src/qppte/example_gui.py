@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from tree_sitter import Point, QueryCursor
+from tree_sitter import Node, Point, QueryCursor
 
 from qppte.qpythonplaintextedit import HIGHLIGHTER_QUERY, PYTHON_PARSER, QPythonPlainTextEdit
 
@@ -22,7 +22,7 @@ class TextEditorWindow(QMainWindow):
         self.setWindowTitle("QPythonPlainTextEdit Demo")
         self.setGeometry(100, 100, 800, 600)
 
-        text_edit = QPythonPlainTextEdit(highlightStyle="default")
+        text_edit = QPythonPlainTextEdit(highlightStyle="light_bold")
 
         root_panel = QWidget()
         layout = QVBoxLayout()
@@ -30,6 +30,7 @@ class TextEditorWindow(QMainWindow):
 
         styles_selector = QComboBox()
         styles_selector.addItems(QPythonPlainTextEdit.listHighlightStyles())
+        styles_selector.setCurrentText(text_edit.getHighlightStyle())
 
         styles_selector.currentTextChanged.connect(text_edit.setHighlightStyle)
 
@@ -110,13 +111,17 @@ if __name__ == "__main__":
     query_cursor = QueryCursor(HIGHLIGHTER_QUERY)
     captures = query_cursor.captures(tree.root_node)
 
-    for capture_name in captures:
-        for node in captures[capture_name]:
-            start_offset = get_offset(input_lines, node.start_point)
-            end_offset = get_offset(input_lines, node.end_point)
-            print(
-                f"@{capture_name:20} {node.start_point.row:2}:{node.start_point.column:<2} [{window.sample_text[start_offset:end_offset]}]"
-            )
+    matches: list[tuple[int, dict[str, list[Node]]]] = query_cursor.matches(tree.root_node)
+    matches.sort(key=lambda m: m[0])
+    for _, m in matches:
+        for capture_name, nodes in m.items():
+            for node in nodes:
+                start_offset = get_offset(input_lines, node.start_point)
+                end_offset = get_offset(input_lines, node.end_point)
+                print(
+                    f"@{capture_name:20} {node.start_point.row:2}:{node.start_point.column:<2}"
+                    f" [{window.sample_text[start_offset:end_offset]}]"
+                )
 
     window.show()
     sys.exit(app.exec())

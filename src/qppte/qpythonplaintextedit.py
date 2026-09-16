@@ -4,7 +4,7 @@ from typing import override
 import tree_sitter_python
 from PySide6.QtGui import QPalette, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QWidget
-from tree_sitter import Language, Parser, Point, Query, QueryCursor
+from tree_sitter import Language, Node, Parser, Point, Query, QueryCursor
 
 from qppte.style import STYLES
 
@@ -24,8 +24,10 @@ HIGHLIGHTER_QUERY = Query(
         (class_definition
           name: (identifier) @class_definition_name)
 
-        (decorator "@" @decorator)  
+        (call (identifier) @function_call)
         (decorator "@" (identifier)) @decorator 
+        (decorator "@" (call (identifier) @decorator))  
+        (decorator ("@" @decorator))
 
         (string_start) @string
         (string_content) @string
@@ -40,8 +42,6 @@ HIGHLIGHTER_QUERY = Query(
 
         (integer) @number
         (float) @number
-
-        (call (identifier) @function_call)
 
         (keyword_argument (identifier) @keyword_argument) 
 
@@ -88,13 +88,15 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         input_text = text.encode()
         tree = PYTHON_PARSER.parse(input_text)
         query_cursor = QueryCursor(HIGHLIGHTER_QUERY)
-        captures = query_cursor.captures(tree.root_node)
 
-        for capture_name in captures:
-            for node in captures[capture_name]:
-                cursor.setPosition(get_offset(node.start_point))
-                cursor.setPosition(get_offset(node.end_point), QTextCursor.MoveMode.KeepAnchor)
-                cursor.setCharFormat(STYLES[self.__highlightStyle][capture_name])
+        matches: list[tuple[int, dict[str, list[Node]]]] = query_cursor.matches(tree.root_node)
+        matches.sort(key=lambda m: m[0])
+        for _, m in matches:
+            for capture_name, nodes in m.items():
+                for node in nodes:
+                    cursor.setPosition(get_offset(node.start_point))
+                    cursor.setPosition(get_offset(node.end_point), QTextCursor.MoveMode.KeepAnchor)
+                    cursor.setCharFormat(STYLES[self.__highlightStyle][capture_name])
 
         self.__highlight_done_once = True
 
@@ -138,6 +140,10 @@ class QPythonPlainTextEdit(QPlainTextEdit):
             self.__highlightStyle = highlightStyle
             self.__setBackground()
             self.setPlainText(self.toPlainText())
+
+    def getHighlightStyle(self) -> str:
+        """Returns highlight style currently in use"""
+        return self.__highlightStyle
 
     def setEnableSyntaxHighlighting(self, enableSyntaxHighlighting: bool) -> None:
         """
