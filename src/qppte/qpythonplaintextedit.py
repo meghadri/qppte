@@ -1,8 +1,9 @@
 from threading import Lock
+from typing import override
 
 import tree_sitter_python
 from PySide6.QtGui import QPalette, QTextCharFormat, QTextCursor
-from PySide6.QtWidgets import QPlainTextEdit
+from PySide6.QtWidgets import QPlainTextEdit, QWidget
 from tree_sitter import Language, Parser, Point, Query, QueryCursor
 
 from qppte.style import STYLES
@@ -52,20 +53,30 @@ HIGHLIGHTER_QUERY = Query(
 
 
 class QPythonPlainTextEdit(QPlainTextEdit):
-    def __init__(self, style: str = "default"):
-        super().__init__()
-        self.working = False
+    def __init__(
+        self, parent: QWidget | None = None, highlightStyle: str = "default", enableSyntaxHighlighting: bool = True
+    ):
+        super().__init__(parent)
+        self.__syntax_highlighting_enabled = enableSyntaxHighlighting
+        self.__working = False
+
         self.setAutoFillBackground(True)
-        self.style = style
+        self.__highlightStyle = highlightStyle
+        self.__setBackground()
+
+        self.__lock = Lock()
+        self.__highlight_done_once = False
+        self.__signal_connected = False
+
+    def __setBackground(self):
         palette = QPalette()
-        palette.setColor(QPalette.ColorRole.Base, STYLES[self.style]["QPlainTextEdit_background_color"])
+        palette.setColor(QPalette.ColorRole.Base, STYLES[self.__highlightStyle]["QPlainTextEdit_background_color"])
         self.setPalette(palette)
 
-        self.lock = Lock()
-        self.highlight_done_once = False
-        self.signal_connected = False
+    def __highlight(self) -> None:
+        if not self.__syntax_highlighting_enabled:
+            return
 
-    def highlight(self) -> None:
         cursor: QTextCursor = self.textCursor()
 
         text = self.toPlainText()
@@ -83,42 +94,62 @@ class QPythonPlainTextEdit(QPlainTextEdit):
             for node in captures[capture_name]:
                 cursor.setPosition(get_offset(node.start_point))
                 cursor.setPosition(get_offset(node.end_point), QTextCursor.MoveMode.KeepAnchor)
-                cursor.setCharFormat(STYLES[self.style][capture_name])
+                cursor.setCharFormat(STYLES[self.__highlightStyle][capture_name])
 
-        self.highlight_done_once = True
+        self.__highlight_done_once = True
 
-    def rehighlight(self):
-        with self.lock:
-            if self.working:
+    def __rehighlight(self):
+        with self.__lock:
+            if self.__working:
                 return
             else:
-                self.working = True
+                self.__working = True
 
         try:
-            if self.isReadOnly() and self.highlight_done_once:
+            if self.isReadOnly() and self.__highlight_done_once:
                 return
 
+            # clear all formatting first
             cursor: QTextCursor = self.textCursor()
             cursor.setPosition(0)
             cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
             cursor.setCharFormat(QTextCharFormat())
-            self.highlight()
-            self.highlight_done_once = True
+
+            self.__highlight()
+            self.__highlight_done_once = True
         finally:
-            self.working = False
+            self.__working = False
 
-    def setCode(self, text: str) -> None:
-        self.highlight_done_once = False
-        self.setPlainText(text)
-        self.rehighlight()
-        if not self.signal_connected:
-            self.textChanged.connect(self.rehighlight)
-            self.signal_connected = True
+    @override
+    def setPlainText(self, text: str, /) -> None:
+        self.__highlight_done_once = False
+        super().setPlainText(text)
+        self.__rehighlight()
+        if not self.__signal_connected:
+            self.textChanged.connect(self.__rehighlight)
+            self.__signal_connected = True
 
-    def setHighlightStyle(self, style: str) -> None:
-        if self.style != style:
-            self.style = style
-            palette = QPalette()
-            palette.setColor(QPalette.ColorRole.Base, STYLES[self.style]["QPlainTextEdit_background_color"])
-            self.setPalette(palette)
-            self.setCode(self.toPlainText())
+    def setHighlightStyle(self, highlightStyle: str) -> None:
+        """
+        Sets new highlight style. This will trigger re-rendering of text.
+        Note that this is a NO-OP if syntax highlighting is disabled
+        """
+        if self.__highlightStyle != highlightStyle:
+            self.__highlightStyle = highlightStyle
+            self.__setBackground()
+            self.setPlainText(self.toPlainText())
+
+    def setEnableSyntaxHighlighting(self, enableSyntaxHighlighting: bool) -> None:
+        """
+        Following will trigger clearing of existing highlighting style and application of new style if any.
+        Note that if you are disabling syntax highlighting and previous style affected background color,
+        then this operation will not affect background color.
+        """
+        if self.__syntax_highlighting_enabled != enableSyntaxHighlighting:
+            self.__syntax_highlighting_enabled = enableSyntaxHighlighting
+            self.setPlainText(self.toPlainText())
+
+    @staticmethod
+    def listHighlightStyles() -> list[str]:
+        """Returns list of available highlight styles that can be used with QPythonPlainTextEdit class"""
+        return STYLES.keys()

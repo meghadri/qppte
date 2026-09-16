@@ -1,6 +1,16 @@
 import sys
 
-from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 from tree_sitter import Point, QueryCursor
 
 from qppte.qpythonplaintextedit import HIGHLIGHTER_QUERY, PYTHON_PARSER, QPythonPlainTextEdit
@@ -9,12 +19,48 @@ from qppte.qpythonplaintextedit import HIGHLIGHTER_QUERY, PYTHON_PARSER, QPython
 class TextEditorWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Text Editor with Comment Toggle (Ctrl-/)")
+        self.setWindowTitle("QPythonPlainTextEdit Demo")
         self.setGeometry(100, 100, 800, 600)
 
-        self.text_edit = QPythonPlainTextEdit("light_bold")
-        self.setCentralWidget(self.text_edit)
-        # Add sample text
+        text_edit = QPythonPlainTextEdit(highlightStyle="default")
+
+        root_panel = QWidget()
+        layout = QVBoxLayout()
+        root_panel.setLayout(layout)
+
+        styles_selector = QComboBox()
+        styles_selector.addItems(QPythonPlainTextEdit.listHighlightStyles())
+
+        styles_selector.currentTextChanged.connect(text_edit.setHighlightStyle)
+
+        tools_panel = QWidget()
+        tools_layout = QHBoxLayout()
+        tools_panel.setLayout(tools_layout)
+        tools_layout.addWidget(QLabel("Highlighting Style"))
+        tools_layout.addWidget(styles_selector)
+        tools_layout.addWidget(QLabel("        "))
+
+        highlighting_enabled_cb = QCheckBox("Highlighting Enabled")
+        tools_layout.addWidget(highlighting_enabled_cb)
+        highlighting_enabled_cb.setChecked(True)
+
+        def toggle_highlighting(enabled: bool):
+            text_edit.setEnableSyntaxHighlighting(enabled)
+
+        highlighting_enabled_cb.toggled.connect(toggle_highlighting)
+
+        tools_layout.addWidget(QLabel(""), stretch=1)
+
+        exit_button = QPushButton("Exit")
+        tools_layout.addWidget(exit_button)
+        exit_button.clicked.connect(self.close)
+
+        layout.addWidget(tools_panel)
+
+        layout.addWidget(text_edit)
+
+        self.setCentralWidget(root_panel)
+
         self.sample_text = """@property
 def foo() -> None:
     pass
@@ -23,7 +69,7 @@ def foo() -> None:
 def moo() -> None:
     pass
 """
-        self.text_edit.setCode(self.sample_text)
+        text_edit.setPlainText(self.sample_text)
 
 
 def pretty_print(node, input_source_bytes: bytes, indent="", show_matched_text: bool = False):
