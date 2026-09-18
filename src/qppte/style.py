@@ -20,7 +20,7 @@ class TextCharFormat(QTextCharFormat):
         self.setFontUnderline(underline)
 
 
-STYLES = {
+DEFAULT_STYLES: dict[str, dict[str, TextCharFormat | str]] = {
     "default": {
         "function_definition": TextCharFormat(foreground_color="#00627A"),
         "special_function": TextCharFormat(foreground_color="#B200B2"),

@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from tree_sitter import Point
 
 from qppte.qpythonplaintextedit import QPythonPlainTextEdit
 
@@ -35,7 +34,7 @@ class TextEditorWindow(QMainWindow):
         root_panel.setLayout(layout)
 
         styles_selector = QComboBox()
-        styles_selector.addItems(QPythonPlainTextEdit.listHighlightStyles())
+        styles_selector.addItems(text_edit.listAvailableHighlightStyles())
         styles_selector.setCurrentText(text_edit.getHighlightStyle())
 
         styles_selector.currentTextChanged.connect(text_edit.setHighlightStyle)
@@ -127,10 +126,6 @@ def pretty_print(node, input_source_bytes: bytes, indent="", show_matched_text: 
     # Recursively format all children
     for child in node.children:
         pretty_print(child, input_source_bytes, indent + "  ")
-
-
-def get_offset(lines: list[str], p: Point) -> int:
-    return sum([len(line) for line in lines[0 : p.row]]) + p.column + p.row
 
 
 if __name__ == "__main__":

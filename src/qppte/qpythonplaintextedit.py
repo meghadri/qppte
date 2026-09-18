@@ -5,14 +5,13 @@ from functools import cache, reduce
 from threading import Lock
 from typing import NamedTuple, override
 
-import PySide6
 import tree_sitter_python
 from PySide6 import QtCore
 from PySide6.QtGui import QKeyEvent, QPalette, Qt, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QWidget
 from tree_sitter import Language, Node, Parser, Point, Query, QueryCursor
 
-from qppte.style import STYLES
+from qppte.style import DEFAULT_STYLES, TextCharFormat
 
 PY_LANGUAGE = Language(tree_sitter_python.language())
 PYTHON_PARSER = Parser(PY_LANGUAGE)
@@ -82,7 +81,7 @@ class UndoOp(NamedTuple):
     cursor_position: int
 
 
-ACTION_TRIGGERS = {
+DEFAULT_ACTION_TRIGGERS: dict[str, ActionTrigger] = {
     "indent_block": ActionTrigger((Qt.Key.Key_Tab,), tuple()),
     "clear_selection": ActionTrigger((Qt.Key.Key_Escape,), tuple()),
     "backspace": ActionTrigger((Qt.Key.Key_Backspace,), tuple()),
@@ -106,61 +105,79 @@ ACTION_TRIGGERS = {
     "duplicate_line": ActionTrigger((Qt.Key.Key_D,), (QtCore.Qt.KeyboardModifier.ControlModifier,)),
     "toggle_comment_block": ActionTrigger((Qt.Key.Key_Slash,), (QtCore.Qt.KeyboardModifier.ControlModifier,)),
 }
-TAB_NUM_CHARS = 4
-TAB_SPACES = " " * TAB_NUM_CHARS
-
-
-class TC(QTextCursor):
-    def setPosition(
-        self, pos: int, /, mode: PySide6.QtGui.QTextCursor.MoveMode = QTextCursor.MoveMode.MoveAnchor
-    ) -> None:
-        super().setPosition(pos, mode)
 
 
 class QPythonPlainTextEdit(QPlainTextEdit):
     def __init__(
-        self, parent: QWidget | None = None, highlightStyle: str = "default", enableSyntaxHighlighting: bool = True
+        self,
+        parent: QWidget | None = None,
+        highlightStyle: str = "default",
+        enableSyntaxHighlighting: bool = True,
+        syntaxHighlightStyles: dict[str, dict[str, TextCharFormat | str]] | None = None,
+        tabWidthSpaces: int = 4,
+        actionTriggers: dict[str, ActionTrigger] | None = None,
     ):
         super().__init__(parent)
         self.__syntax_highlighting_enabled = enableSyntaxHighlighting
         self.__working = False
+        self.__styles = DEFAULT_STYLES if syntaxHighlightStyles is None else syntaxHighlightStyles
+        if highlightStyle not in self.__styles:
+            raise ValueError(f"Highlight style [{highlightStyle}] is not present in the list of available styles")
+
+        self.__tab_width_num_spaces = tabWidthSpaces
+        self.__tab_spaces = " " * self.__tab_width_num_spaces
+
+        self.actionTriggers = DEFAULT_ACTION_TRIGGERS if actionTriggers is None else actionTriggers
 
         self.setAutoFillBackground(True)
         self.__highlightStyle = highlightStyle
+        self.__highlightStyleDict = self.__styles[highlightStyle]
         self.__setBackground()
 
         self.__lock = Lock()
         self.__highlight_done_once = False
         self.__signal_connected = False
-        self.undo_queue = deque[UndoOp](maxlen=200)
-        self.redo_queue = deque[UndoOp](maxlen=200)
+        self.__undo_queue = deque[UndoOp](maxlen=200)
+        self.__redo_queue = deque[UndoOp](maxlen=200)
 
-    def textCursor(self, /) -> PySide6.QtGui.QTextCursor:
-        return TC(super().textCursor())
+    def setTabWidth(self, tabWidthSpaces: int) -> None:
+        """
+        Tabs are always transformed into spaces when typing. This functions sets into how many spaces it is
+        transformed. By default, a TAB is converted into 4 empty space characters.
+        """
+        self.__tab_width_num_spaces = tabWidthSpaces
+        self.__tab_spaces = " " * self.__tab_width_num_spaces
 
+    def getTabWidth(self) -> int:
+        """Returns number of spaces to be inserted when user presses TAB on the keyboard."""
+        return self.__tab_width_num_spaces
+
+    def recordStateForUndoOperation(self) -> None:
+        """To be called when extending custom commands."""
+        self.__undo_queue.append(UndoOp(self.toPlainText(), self.textCursor().position()))
+
+    @override
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        key = event.key()
-        # print(event)
         if event.type() == QtCore.QEvent.Type.KeyPress:
             if event.text().isprintable() and event.modifiers() in (
                 QtCore.Qt.KeyboardModifier.NoModifier,
                 QtCore.Qt.KeyboardModifier.ShiftModifier,
             ):
-                self.redo_queue.clear()
+                self.__redo_queue.clear()
                 c = self.textCursor()
-                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                self.__undo_queue.append(UndoOp(self.toPlainText(), c.position()))
                 super().keyPressEvent(event)
                 return
 
-            if ACTION_TRIGGERS["clear_selection"].match(event):
+            if self.actionTriggers["clear_selection"].match(event):
                 c = self.textCursor()
                 c.clearSelection()
                 self.setTextCursor(c)
                 return
 
-            if ACTION_TRIGGERS["delete_lines"].match(event):
+            if self.actionTriggers["delete_lines"].match(event):
                 c = self.textCursor()
-                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                self.__undo_queue.append(UndoOp(self.toPlainText(), c.position()))
                 if c.hasSelection():
                     # delete all lines for this block
                     selection_start = c.selectionStart()
@@ -177,9 +194,9 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                 self.setTextCursor(c)
                 return
 
-            if ACTION_TRIGGERS["indent_block"].match(event):
+            if self.actionTriggers["indent_block"].match(event):
                 c = self.textCursor()
-                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                self.__undo_queue.append(UndoOp(self.toPlainText(), c.position()))
                 if c.hasSelection():
                     # we will be moving entire block
                     selection_start = c.selectionStart()
@@ -191,13 +208,15 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                     num_lines = len(c.selection().toPlainText().splitlines())
                     c.setPosition(selection_start, QTextCursor.MoveMode.MoveAnchor)
                     c.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.MoveAnchor)
-                    c.insertText(TAB_SPACES)
+                    c.insertText(self.__tab_spaces)
                     for _ in range(num_lines - 1):
                         c.movePosition(QTextCursor.MoveOperation.Down)
                         c.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.MoveAnchor)
-                        c.insertText(TAB_SPACES)
-                    c.setPosition(selection_start + TAB_NUM_CHARS, QTextCursor.MoveMode.MoveAnchor)
-                    c.setPosition(selection_end + TAB_NUM_CHARS * num_lines, QTextCursor.MoveMode.KeepAnchor)
+                        c.insertText(self.__tab_spaces)
+                    c.setPosition(selection_start + self.__tab_width_num_spaces, QTextCursor.MoveMode.MoveAnchor)
+                    c.setPosition(
+                        selection_end + self.__tab_width_num_spaces * num_lines, QTextCursor.MoveMode.KeepAnchor
+                    )
                     self.setTextCursor(c)
                 else:
                     pos = c.position()
@@ -208,20 +227,20 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                     if m:
                         leading_space = m.group(1)
                         if column <= len(leading_space):
-                            new_line = (TAB_SPACES) + text
+                            new_line = (self.__tab_spaces) + text
                             c.removeSelectedText()
                             c.insertText(new_line)
                         else:
                             c.setPosition(pos, QTextCursor.MoveMode.MoveAnchor)
-                            c.insertText(TAB_SPACES)
-                        c.setPosition(pos + TAB_NUM_CHARS)
+                            c.insertText(self.__tab_spaces)
+                        c.setPosition(pos + self.__tab_width_num_spaces)
                         self.setTextCursor(c)
 
                 return
 
-            if ACTION_TRIGGERS["unindent"].match(event):
+            if self.actionTriggers["unindent"].match(event):
                 c = self.textCursor()
-                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                self.__undo_queue.append(UndoOp(self.toPlainText(), c.position()))
                 if c.hasSelection():
                     # we will be moving entire block
                     selection_start = c.selectionStart()
@@ -239,7 +258,7 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                     new_lines = []
                     for line in lines:
                         new_line = line.lstrip()
-                        new_num_spaces = len(line) - len(new_line) - TAB_NUM_CHARS
+                        new_num_spaces = len(line) - len(new_line) - self.__tab_width_num_spaces
                         if new_num_spaces > 0:
                             new_line = (" " * new_num_spaces) + new_line
                         if start_offset == -1:
@@ -267,7 +286,11 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                         sp = m.group(1)
                         len_sp = len(sp)
                         if len_sp > 0:
-                            new_text = text.lstrip() if len_sp < TAB_NUM_CHARS else text.removeprefix(TAB_SPACES)
+                            new_text = (
+                                text.lstrip()
+                                if len_sp < self.__tab_width_num_spaces
+                                else text.removeprefix(self.__tab_spaces)
+                            )
                             new_len_sp = len_sp - (len(text) - len(new_text))
                             c.removeSelectedText()
                             c.insertText(new_text)
@@ -275,7 +298,7 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                                 c.setPosition(pos)
                             else:
                                 if column > len_sp:
-                                    c.setPosition(pos - TAB_NUM_CHARS)
+                                    c.setPosition(pos - self.__tab_width_num_spaces)
                                 else:
                                     c.movePosition(
                                         QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.MoveAnchor
@@ -285,35 +308,35 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                             self.setTextCursor(c)
                 return
 
-            if ACTION_TRIGGERS["backspace"].match(event):
+            if self.actionTriggers["backspace"].match(event):
                 c = self.textCursor()
                 if c.hasSelection():
                     super().keyPressEvent(event)
                     return
-                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                self.__undo_queue.append(UndoOp(self.toPlainText(), c.position()))
                 column = c.columnNumber()
                 c.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.KeepAnchor)
                 selected_text = c.selectedText()
                 if selected_text.strip() == "":
                     # cursor is placed in the leading white space
-                    spaces_to_remove = column % TAB_NUM_CHARS
+                    spaces_to_remove = column % self.__tab_width_num_spaces
                     if spaces_to_remove > 0:
                         c.removeSelectedText()
-                        c.insertText(TAB_SPACES * int(column / TAB_NUM_CHARS))
+                        c.insertText(self.__tab_spaces * int(column / self.__tab_width_num_spaces))
                         self.setTextCursor(c)
                     elif selected_text != "":
                         c.removeSelectedText()
-                        c.insertText(TAB_SPACES * int(column / TAB_NUM_CHARS - 1))
+                        c.insertText(self.__tab_spaces * int(column / self.__tab_width_num_spaces - 1))
                     else:
                         super().keyPressEvent(event)
                 else:
                     super().keyPressEvent(event)
                 return
 
-            if ACTION_TRIGGERS["new_line"].match(event):
+            if self.actionTriggers["new_line"].match(event):
                 # pressing Enter or Return
                 c = self.textCursor()
-                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                self.__undo_queue.append(UndoOp(self.toPlainText(), c.position()))
                 column = c.columnNumber()
                 c.select(QTextCursor.SelectionType.LineUnderCursor)
                 text = c.selectedText()
@@ -335,9 +358,9 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                 self.setTextCursor(c)
                 return
 
-            if ACTION_TRIGGERS["move_line_up"].match(event):
+            if self.actionTriggers["move_line_up"].match(event):
                 c = self.textCursor()
-                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                self.__undo_queue.append(UndoOp(self.toPlainText(), c.position()))
                 at_column = c.columnNumber()
                 c.select(QTextCursor.SelectionType.LineUnderCursor)
                 line_to_move = c.selection().toPlainText()
@@ -352,9 +375,9 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                 self.setTextCursor(c)
                 return
 
-            if ACTION_TRIGGERS["move_line_down"].match(event):
+            if self.actionTriggers["move_line_down"].match(event):
                 c = self.textCursor()
-                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                self.__undo_queue.append(UndoOp(self.toPlainText(), c.position()))
                 at_column = c.columnNumber()
                 c.select(QTextCursor.SelectionType.LineUnderCursor)
                 line_to_move = c.selection().toPlainText()
@@ -369,9 +392,9 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                 self.setTextCursor(c)
                 return
 
-            if ACTION_TRIGGERS["duplicate_line"].match(event):
+            if self.actionTriggers["duplicate_line"].match(event):
                 c = self.textCursor()
-                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                self.__undo_queue.append(UndoOp(self.toPlainText(), c.position()))
                 at_column = c.columnNumber()
                 c.select(QTextCursor.SelectionType.LineUnderCursor)
                 line_str = c.selection().toPlainText()
@@ -382,10 +405,10 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                 self.setTextCursor(c)
                 return
 
-            if ACTION_TRIGGERS["toggle_comment_block"].match(event):
+            if self.actionTriggers["toggle_comment_block"].match(event):
                 # (Un)Comment out line or selection of lines on Ctrl-/
                 c = self.textCursor()
-                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                self.__undo_queue.append(UndoOp(self.toPlainText(), c.position()))
                 one_line_comment = False
                 if not c.hasSelection():
                     c.select(QTextCursor.SelectionType.LineUnderCursor)
@@ -431,10 +454,10 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                 self.setTextCursor(c)
                 return
 
-            if ACTION_TRIGGERS["undo"].match(event):
+            if self.actionTriggers["undo"].match(event):
                 with suppress(IndexError):
-                    op: UndoOp = self.undo_queue.pop()
-                    self.redo_queue.append(UndoOp(self.toPlainText(), self.textCursor().position()))
+                    op: UndoOp = self.__undo_queue.pop()
+                    self.__redo_queue.append(UndoOp(self.toPlainText(), self.textCursor().position()))
                     self.clear()
                     self.setPlainText(op.text)
                     c = self.textCursor()
@@ -442,11 +465,11 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                     self.setTextCursor(c)
                     return
 
-            if ACTION_TRIGGERS["redo"].match(event):
+            if self.actionTriggers["redo"].match(event):
                 with suppress(IndexError):
-                    self.undo_queue.append(UndoOp(self.toPlainText(), self.textCursor().position()))
-                    op: UndoOp = self.redo_queue.pop()
-                    self.undo_queue.append(op)
+                    self.__undo_queue.append(UndoOp(self.toPlainText(), self.textCursor().position()))
+                    op: UndoOp = self.__redo_queue.pop()
+                    self.__undo_queue.append(op)
                     self.clear()
                     self.setPlainText(op.text)
                     c = self.textCursor()
@@ -455,13 +478,13 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                     return
 
             if event.text() != "":
-                self.undo_queue.append(UndoOp(self.toPlainText(), self.textCursor().position()))
+                self.__undo_queue.append(UndoOp(self.toPlainText(), self.textCursor().position()))
 
         super().keyPressEvent(event)
 
     def __setBackground(self):
         palette = QPalette()
-        palette.setColor(QPalette.ColorRole.Base, STYLES[self.__highlightStyle]["QPlainTextEdit_background_color"])
+        palette.setColor(QPalette.ColorRole.Base, self.__highlightStyleDict["QPlainTextEdit_background_color"])
         self.setPalette(palette)
 
     def __highlight(self) -> None:
@@ -485,9 +508,18 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         for _, m in matches:
             for capture_name, nodes in m.items():
                 for node in nodes:
-                    cursor.setPosition(get_offset(node.start_point))
-                    cursor.setPosition(get_offset(node.end_point), QTextCursor.MoveMode.KeepAnchor)
-                    cursor.setCharFormat(STYLES[self.__highlightStyle][capture_name])
+                    cursor.setPosition(
+                        sum([len(line) for line in lines[0 : node.start_point.row]])
+                        + node.start_point.column
+                        + node.start_point.row
+                    )
+                    cursor.setPosition(
+                        sum([len(line1) for line1 in lines[0 : node.end_point.row]])
+                        + node.end_point.column
+                        + node.end_point.row,
+                        QTextCursor.MoveMode.KeepAnchor,
+                    )
+                    cursor.setCharFormat(self.__highlightStyleDict[capture_name])
 
         self.__highlight_done_once = True
 
@@ -529,6 +561,7 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         """
         if self.__highlightStyle != highlightStyle:
             self.__highlightStyle = highlightStyle
+            self.__highlightStyleDict = self.__styles[highlightStyle]
             self.__setBackground()
             self.setPlainText(self.toPlainText())
 
@@ -546,7 +579,8 @@ class QPythonPlainTextEdit(QPlainTextEdit):
             self.__syntax_highlighting_enabled = enableSyntaxHighlighting
             self.setPlainText(self.toPlainText())
 
-    @staticmethod
-    def listHighlightStyles() -> list[str]:
-        """Returns list of available highlight styles that can be used with QPythonPlainTextEdit class"""
-        return STYLES.keys()
+    def listAvailableHighlightStyles(self) -> list[str]:
+        """
+        Returns list of available highlight styles that can be used with this instance of QPythonPlainTextEdit class.
+        """
+        return list(self.__styles.keys())

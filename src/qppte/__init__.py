@@ -1,1 +1,1 @@
-from .qpythonplaintextedit import QPythonPlainTextEdit
+from .qpythonplaintextedit import DEFAULT_ACTION_TRIGGERS, ActionTrigger, QPythonPlainTextEdit
