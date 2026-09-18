@@ -1,19 +1,25 @@
 import sys
+from pathlib import Path
 
+from PySide6 import QtCore
+from PySide6.QtGui import QKeyEvent, Qt
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
+    QMenuBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
-from tree_sitter import Node, Point, QueryCursor
+from tree_sitter import Point
 
-from qppte.qpythonplaintextedit import HIGHLIGHTER_QUERY, PYTHON_PARSER, QPythonPlainTextEdit
+from qppte.qpythonplaintextedit import QPythonPlainTextEdit
 
 
 class TextEditorWindow(QMainWindow):
@@ -72,6 +78,39 @@ def moo() -> None:
 """
         text_edit.setPlainText(self.sample_text)
 
+        menu_bar = QMenuBar()
+
+        def open_file():
+            file_name, _ = QFileDialog.getOpenFileName(
+                self, caption="Import project from file", dir=str(Path.home()), filter="*.py"
+            )
+            if file_name != "":
+                text_edit.setPlainText(Path(file_name).read_text())
+
+        file_menu = QMenu("&File", menu_bar)
+        file_menu.addAction("&Open", open_file)
+        file_menu.addSeparator()
+        file_menu.addAction("&Quit", self.close)
+        menu_bar.addMenu(file_menu)
+
+        edit_menu = QMenu("&Edit", menu_bar)
+        edit_menu.addAction(
+            "&Undo [Ctrl-Z]",
+            lambda: text_edit.keyPressEvent(
+                QKeyEvent(QtCore.QEvent.Type.KeyPress, Qt.Key.Key_Z, QtCore.Qt.KeyboardModifier.ControlModifier, "z")
+            ),
+        )
+        edit_menu.addAction(
+            "&Redo [Ctrl-R]",
+            lambda: text_edit.keyPressEvent(
+                QKeyEvent(QtCore.QEvent.Type.KeyPress, Qt.Key.Key_R, QtCore.Qt.KeyboardModifier.ControlModifier, "z")
+            ),
+        )
+        edit_menu.addSeparator()
+        menu_bar.addMenu(edit_menu)
+
+        self.setMenuBar(menu_bar)
+
 
 def pretty_print(node, input_source_bytes: bytes, indent="", show_matched_text: bool = False):
     # Named nodes represent actual syntax constructs (like 'function_definition')
@@ -97,31 +136,5 @@ def get_offset(lines: list[str], p: Point) -> int:
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = TextEditorWindow()
-
-    # show parsed tree
-    input_lines = window.sample_text.splitlines()
-    input_text_bytes = window.sample_text.encode()
-    tree = PYTHON_PARSER.parse(input_text_bytes)
-    print("=========== PARSED TREE ===========")
-    pretty_print(tree.root_node, input_text_bytes, show_matched_text=False)
-    print("===================================")
-
-    # do query and show captured results
-    print("=========== QUERY RESULTS ===========")
-    query_cursor = QueryCursor(HIGHLIGHTER_QUERY)
-    captures = query_cursor.captures(tree.root_node)
-
-    matches: list[tuple[int, dict[str, list[Node]]]] = query_cursor.matches(tree.root_node)
-    matches.sort(key=lambda m: m[0])
-    for _, m in matches:
-        for capture_name, nodes in m.items():
-            for node in nodes:
-                start_offset = get_offset(input_lines, node.start_point)
-                end_offset = get_offset(input_lines, node.end_point)
-                print(
-                    f"@{capture_name:20} {node.start_point.row:2}:{node.start_point.column:<2}"
-                    f" [{window.sample_text[start_offset:end_offset]}]"
-                )
-
     window.show()
     sys.exit(app.exec())

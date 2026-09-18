@@ -9,8 +9,7 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "pyside6>=6.11.1",
-    "tree-sitter>=0.26.0",
-    "tree-sitter-highlight>=0.0.2",
+    "tree-sitter==0.26.0",
     "tree-sitter-python>=0.25.0",
 ]
 
@@ -39,6 +38,9 @@ select = [
     "B", # flake8-bugbear
     "I", # isort
 ]
+
+[tool.uv.sources]
+tree-sitter = { path = "/home/priimak/git/py-tree-sitter/dist/tree_sitter-0.26.0-cp313-cp313-linux_x86_64.whl" }
 
 [dependency-groups]
 dev = [

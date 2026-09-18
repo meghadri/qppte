@@ -1,8 +1,14 @@
+import re
+from collections import deque
+from contextlib import suppress
+from functools import cache, reduce
 from threading import Lock
-from typing import override
+from typing import NamedTuple, override
 
+import PySide6
 import tree_sitter_python
-from PySide6.QtGui import QPalette, QTextCharFormat, QTextCursor
+from PySide6 import QtCore
+from PySide6.QtGui import QKeyEvent, QPalette, Qt, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QWidget
 from tree_sitter import Language, Node, Parser, Point, Query, QueryCursor
 
@@ -51,6 +57,65 @@ HIGHLIGHTER_QUERY = Query(
     """,
 )
 
+COMMENT_REGEX = re.compile(r"^(\s*)#\s?")
+NO_COMMENT_REGEX = re.compile(r"^(\s*)")
+LEADING_SPACE = re.compile(r"""^(\s*).*""")
+
+
+class ActionTrigger(NamedTuple):
+    keys: tuple[int]
+    modifiers: tuple[int]
+
+    @cache
+    def get_modifiers(self) -> int:
+        return reduce(lambda acc, m: acc | m, self.modifiers, QtCore.Qt.KeyboardModifier.NoModifier)
+
+    def match(self, event: QKeyEvent) -> bool:
+        if event.key() in self.keys and (self.modifiers == [] or self.get_modifiers() == event.modifiers()):
+            return True
+        else:
+            return False
+
+
+class UndoOp(NamedTuple):
+    text: str
+    cursor_position: int
+
+
+ACTION_TRIGGERS = {
+    "indent_block": ActionTrigger((Qt.Key.Key_Tab,), tuple()),
+    "clear_selection": ActionTrigger((Qt.Key.Key_Escape,), tuple()),
+    "backspace": ActionTrigger((Qt.Key.Key_Backspace,), tuple()),
+    "new_line": ActionTrigger(
+        (
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Return,
+        ),
+        tuple(),
+    ),
+    "undo": ActionTrigger((Qt.Key.Key_Z,), (QtCore.Qt.KeyboardModifier.ControlModifier,)),
+    "redo": ActionTrigger((Qt.Key.Key_R,), (QtCore.Qt.KeyboardModifier.ControlModifier,)),
+    "unindent": ActionTrigger((Qt.Key.Key_Backtab,), (QtCore.Qt.KeyboardModifier.ShiftModifier,)),
+    "delete_lines": ActionTrigger((Qt.Key.Key_Y,), (QtCore.Qt.KeyboardModifier.ControlModifier,)),
+    "move_line_up": ActionTrigger(
+        (Qt.Key.Key_Up,), (QtCore.Qt.KeyboardModifier.ControlModifier, QtCore.Qt.KeyboardModifier.ShiftModifier)
+    ),
+    "move_line_down": ActionTrigger(
+        (Qt.Key.Key_Down,), (QtCore.Qt.KeyboardModifier.ControlModifier, QtCore.Qt.KeyboardModifier.ShiftModifier)
+    ),
+    "duplicate_line": ActionTrigger((Qt.Key.Key_D,), (QtCore.Qt.KeyboardModifier.ControlModifier,)),
+    "toggle_comment_block": ActionTrigger((Qt.Key.Key_Slash,), (QtCore.Qt.KeyboardModifier.ControlModifier,)),
+}
+TAB_NUM_CHARS = 4
+TAB_SPACES = " " * TAB_NUM_CHARS
+
+
+class TC(QTextCursor):
+    def setPosition(
+        self, pos: int, /, mode: PySide6.QtGui.QTextCursor.MoveMode = QTextCursor.MoveMode.MoveAnchor
+    ) -> None:
+        super().setPosition(pos, mode)
+
 
 class QPythonPlainTextEdit(QPlainTextEdit):
     def __init__(
@@ -67,6 +132,332 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         self.__lock = Lock()
         self.__highlight_done_once = False
         self.__signal_connected = False
+        self.undo_queue = deque[UndoOp](maxlen=200)
+        self.redo_queue = deque[UndoOp](maxlen=200)
+
+    def textCursor(self, /) -> PySide6.QtGui.QTextCursor:
+        return TC(super().textCursor())
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        key = event.key()
+        # print(event)
+        if event.type() == QtCore.QEvent.Type.KeyPress:
+            if event.text().isprintable() and event.modifiers() in (
+                QtCore.Qt.KeyboardModifier.NoModifier,
+                QtCore.Qt.KeyboardModifier.ShiftModifier,
+            ):
+                self.redo_queue.clear()
+                c = self.textCursor()
+                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                super().keyPressEvent(event)
+                return
+
+            if ACTION_TRIGGERS["clear_selection"].match(event):
+                c = self.textCursor()
+                c.clearSelection()
+                self.setTextCursor(c)
+                return
+
+            if ACTION_TRIGGERS["delete_lines"].match(event):
+                c = self.textCursor()
+                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                if c.hasSelection():
+                    # delete all lines for this block
+                    selection_start = c.selectionStart()
+                    selection_end = c.selectionEnd()
+                    c.setPosition(selection_start)
+                    c.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.MoveAnchor)
+                    c.setPosition(selection_end, QTextCursor.MoveMode.KeepAnchor)
+                    c.movePosition(QTextCursor.MoveOperation.EndOfLine, QTextCursor.MoveMode.KeepAnchor)
+                else:
+                    c.select(QTextCursor.SelectionType.LineUnderCursor)
+
+                c.removeSelectedText()
+                c.deleteChar()
+                self.setTextCursor(c)
+                return
+
+            if ACTION_TRIGGERS["indent_block"].match(event):
+                c = self.textCursor()
+                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                if c.hasSelection():
+                    # we will be moving entire block
+                    selection_start = c.selectionStart()
+                    selection_end = c.selectionEnd()
+                    c.setPosition(selection_start)
+                    c.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.MoveAnchor)
+                    c.setPosition(selection_end, QTextCursor.MoveMode.KeepAnchor)
+                    c.movePosition(QTextCursor.MoveOperation.EndOfLine, QTextCursor.MoveMode.KeepAnchor)
+                    num_lines = len(c.selection().toPlainText().splitlines())
+                    c.setPosition(selection_start, QTextCursor.MoveMode.MoveAnchor)
+                    c.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.MoveAnchor)
+                    c.insertText(TAB_SPACES)
+                    for _ in range(num_lines - 1):
+                        c.movePosition(QTextCursor.MoveOperation.Down)
+                        c.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.MoveAnchor)
+                        c.insertText(TAB_SPACES)
+                    c.setPosition(selection_start + TAB_NUM_CHARS, QTextCursor.MoveMode.MoveAnchor)
+                    c.setPosition(selection_end + TAB_NUM_CHARS * num_lines, QTextCursor.MoveMode.KeepAnchor)
+                    self.setTextCursor(c)
+                else:
+                    pos = c.position()
+                    column = c.columnNumber()
+                    c.select(QTextCursor.SelectionType.LineUnderCursor)
+                    text = c.selection().toPlainText()
+                    m = LEADING_SPACE.match(text)
+                    if m:
+                        leading_space = m.group(1)
+                        if column <= len(leading_space):
+                            new_line = (TAB_SPACES) + text
+                            c.removeSelectedText()
+                            c.insertText(new_line)
+                        else:
+                            c.setPosition(pos, QTextCursor.MoveMode.MoveAnchor)
+                            c.insertText(TAB_SPACES)
+                        c.setPosition(pos + TAB_NUM_CHARS)
+                        self.setTextCursor(c)
+
+                return
+
+            if ACTION_TRIGGERS["unindent"].match(event):
+                c = self.textCursor()
+                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                if c.hasSelection():
+                    # we will be moving entire block
+                    selection_start = c.selectionStart()
+                    selection_end = c.selectionEnd()
+                    c.setPosition(selection_start)
+                    c.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.MoveAnchor)
+                    superblock_start = c.position()
+                    c.setPosition(selection_end, QTextCursor.MoveMode.KeepAnchor)
+                    c.movePosition(QTextCursor.MoveOperation.EndOfLine, QTextCursor.MoveMode.KeepAnchor)
+                    lines = c.selection().toPlainText().splitlines()
+                    c.removeSelectedText()
+
+                    end_offset = 0
+                    start_offset = -1
+                    new_lines = []
+                    for line in lines:
+                        new_line = line.lstrip()
+                        new_num_spaces = len(line) - len(new_line) - TAB_NUM_CHARS
+                        if new_num_spaces > 0:
+                            new_line = (" " * new_num_spaces) + new_line
+                        if start_offset == -1:
+                            start_offset = len(line) - len(new_line)
+                        end_offset += len(line) - len(new_line)
+                        new_lines.append(new_line)
+                    c.insertText("\n".join(new_lines))
+                    c = self.textCursor()
+                    c.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.MoveAnchor)
+                    superbloc_end_min_limit = c.position()
+                    c.setPosition(
+                        max(selection_start - start_offset, superblock_start), QTextCursor.MoveMode.MoveAnchor
+                    )
+                    c.setPosition(
+                        max(selection_end - end_offset, superbloc_end_min_limit), QTextCursor.MoveMode.KeepAnchor
+                    )
+                    self.setTextCursor(c)
+                else:
+                    pos = c.position()
+                    column = c.columnNumber()
+                    c.select(QTextCursor.SelectionType.LineUnderCursor)
+                    text = c.selection().toPlainText()
+                    m = LEADING_SPACE.match(text)
+                    if m:
+                        sp = m.group(1)
+                        len_sp = len(sp)
+                        if len_sp > 0:
+                            new_text = text.lstrip() if len_sp < TAB_NUM_CHARS else text.removeprefix(TAB_SPACES)
+                            new_len_sp = len_sp - (len(text) - len(new_text))
+                            c.removeSelectedText()
+                            c.insertText(new_text)
+                            if column <= new_len_sp:
+                                c.setPosition(pos)
+                            else:
+                                if column > len_sp:
+                                    c.setPosition(pos - TAB_NUM_CHARS)
+                                else:
+                                    c.movePosition(
+                                        QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.MoveAnchor
+                                    )
+                                    c.position() + new_len_sp
+                                    c.setPosition(c.position() + new_len_sp)
+                            self.setTextCursor(c)
+                return
+
+            if ACTION_TRIGGERS["backspace"].match(event):
+                c = self.textCursor()
+                if c.hasSelection():
+                    super().keyPressEvent(event)
+                    return
+                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                column = c.columnNumber()
+                c.movePosition(QTextCursor.MoveOperation.StartOfLine, QTextCursor.MoveMode.KeepAnchor)
+                selected_text = c.selectedText()
+                if selected_text.strip() == "":
+                    # cursor is placed in the leading white space
+                    spaces_to_remove = column % TAB_NUM_CHARS
+                    if spaces_to_remove > 0:
+                        c.removeSelectedText()
+                        c.insertText(TAB_SPACES * int(column / TAB_NUM_CHARS))
+                        self.setTextCursor(c)
+                    elif selected_text != "":
+                        c.removeSelectedText()
+                        c.insertText(TAB_SPACES * int(column / TAB_NUM_CHARS - 1))
+                    else:
+                        super().keyPressEvent(event)
+                else:
+                    super().keyPressEvent(event)
+                return
+
+            if ACTION_TRIGGERS["new_line"].match(event):
+                # pressing Enter or Return
+                c = self.textCursor()
+                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                column = c.columnNumber()
+                c.select(QTextCursor.SelectionType.LineUnderCursor)
+                text = c.selectedText()
+                m = LEADING_SPACE.match(text)
+                if m:
+                    sp = m.group(1)
+                    if len(sp) <= column:
+                        super().keyPressEvent(event)
+                        self.textCursor().insertText("    " * int(len(sp) / 4))
+                        return
+
+                c = self.textCursor()
+                pos = c.position()
+                c.movePosition(QTextCursor.MoveOperation.StartOfLine)
+                self.setTextCursor(c)
+                super().keyPressEvent(event)
+                c = self.textCursor()
+                c.setPosition(pos + 1)
+                self.setTextCursor(c)
+                return
+
+            if ACTION_TRIGGERS["move_line_up"].match(event):
+                c = self.textCursor()
+                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                at_column = c.columnNumber()
+                c.select(QTextCursor.SelectionType.LineUnderCursor)
+                line_to_move = c.selection().toPlainText()
+                c.removeSelectedText()
+                c.deleteChar()
+                c.movePosition(QTextCursor.MoveOperation.Up)
+                c.movePosition(QTextCursor.MoveOperation.StartOfLine)
+                c.insertText(line_to_move + "\n")
+                c.movePosition(QTextCursor.MoveOperation.Up)
+                c.movePosition(QTextCursor.MoveOperation.StartOfLine)
+                c.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.MoveAnchor, at_column)
+                self.setTextCursor(c)
+                return
+
+            if ACTION_TRIGGERS["move_line_down"].match(event):
+                c = self.textCursor()
+                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                at_column = c.columnNumber()
+                c.select(QTextCursor.SelectionType.LineUnderCursor)
+                line_to_move = c.selection().toPlainText()
+                c.removeSelectedText()
+                c.deleteChar()
+                c.movePosition(QTextCursor.MoveOperation.Down)
+                c.movePosition(QTextCursor.MoveOperation.StartOfLine)
+                c.insertText(line_to_move + "\n")
+                c.movePosition(QTextCursor.MoveOperation.Up)
+                c.movePosition(QTextCursor.MoveOperation.StartOfLine)
+                c.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.MoveAnchor, at_column)
+                self.setTextCursor(c)
+                return
+
+            if ACTION_TRIGGERS["duplicate_line"].match(event):
+                c = self.textCursor()
+                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                at_column = c.columnNumber()
+                c.select(QTextCursor.SelectionType.LineUnderCursor)
+                line_str = c.selection().toPlainText()
+                c.movePosition(QTextCursor.MoveOperation.EndOfLine)
+                c.insertText(f"\n{line_str}")
+                c.movePosition(QTextCursor.MoveOperation.StartOfLine)
+                c.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.MoveAnchor, at_column)
+                self.setTextCursor(c)
+                return
+
+            if ACTION_TRIGGERS["toggle_comment_block"].match(event):
+                # (Un)Comment out line or selection of lines on Ctrl-/
+                c = self.textCursor()
+                self.undo_queue.append(UndoOp(self.toPlainText(), c.position()))
+                one_line_comment = False
+                if not c.hasSelection():
+                    c.select(QTextCursor.SelectionType.LineUnderCursor)
+                    one_line_comment = True
+
+                selection_start = c.selectionStart()
+                selection_end = c.selectionEnd()
+
+                c.setPosition(selection_start)
+                c.movePosition(QTextCursor.MoveOperation.StartOfLine)
+                start_position = c.position()
+                c.setPosition(selection_end)
+                c.movePosition(QTextCursor.MoveOperation.EndOfLine)
+                end_position = c.position()
+                c.setPosition(start_position)
+                c.setPosition(end_position, QTextCursor.MoveMode.KeepAnchor)
+
+                lines: list[str] = c.selectedText().splitlines()
+                new_lines = []
+                for line in lines:
+                    comment_match = COMMENT_REGEX.match(line)
+                    if comment_match:
+                        new_lines.append(re.sub(COMMENT_REGEX, r"\1", line))
+                    else:
+                        new_lines.append(re.sub(NO_COMMENT_REGEX, r"\1# ", line))
+
+                new_text_block = "\n".join(new_lines)
+                c.beginEditBlock()
+                c.removeSelectedText()
+                c.insertText(new_text_block)
+                c.endEditBlock()
+
+                if one_line_comment:
+                    c.movePosition(QTextCursor.MoveOperation.Down)
+                else:
+                    # try to keep selection; it will be distorted a bit most of the time though
+                    c.setPosition(start_position)
+                    c.setPosition(
+                        min(start_position + len(new_text_block), self.document().characterCount() - 1),
+                        QTextCursor.MoveMode.KeepAnchor,
+                    )
+
+                self.setTextCursor(c)
+                return
+
+            if ACTION_TRIGGERS["undo"].match(event):
+                with suppress(IndexError):
+                    op: UndoOp = self.undo_queue.pop()
+                    self.redo_queue.append(UndoOp(self.toPlainText(), self.textCursor().position()))
+                    self.clear()
+                    self.setPlainText(op.text)
+                    c = self.textCursor()
+                    c.setPosition(op.cursor_position)
+                    self.setTextCursor(c)
+                    return
+
+            if ACTION_TRIGGERS["redo"].match(event):
+                with suppress(IndexError):
+                    self.undo_queue.append(UndoOp(self.toPlainText(), self.textCursor().position()))
+                    op: UndoOp = self.redo_queue.pop()
+                    self.undo_queue.append(op)
+                    self.clear()
+                    self.setPlainText(op.text)
+                    c = self.textCursor()
+                    c.setPosition(op.cursor_position)
+                    self.setTextCursor(c)
+                    return
+
+            if event.text() != "":
+                self.undo_queue.append(UndoOp(self.toPlainText(), self.textCursor().position()))
+
+        super().keyPressEvent(event)
 
     def __setBackground(self):
         palette = QPalette()
