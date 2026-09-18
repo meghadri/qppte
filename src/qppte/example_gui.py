@@ -128,8 +128,12 @@ def pretty_print(node, input_source_bytes: bytes, indent="", show_matched_text: 
         pretty_print(child, input_source_bytes, indent + "  ")
 
 
-if __name__ == "__main__":
+def main():
     app = QApplication(sys.argv)
     window = TextEditorWindow()
     window.show()
     sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
