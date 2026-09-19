@@ -27,7 +27,7 @@ uv tool run --from git+https://github.com/priimak/qppte.git@v0.5.0 qppte_demo
     * Press `Tab` to indent a line or a selected block by a Tab width number of spaces. Tab is always converted into
       space (default 4).
 * Undo and Redo
-    * `Ctrl-Z` and `Ctrl-R`
+    * `Ctrl-Z` and `Ctrl-R` for undo and redo respectively.
 * Unindent line or block
     * Press `Shift-Tab` to unindent a line or a selected block by a Tab width number of spaces.
 * Delete line or block.
