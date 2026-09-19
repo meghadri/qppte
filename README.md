@@ -74,5 +74,12 @@ class TextEditorWindow(QMainWindow):
 * `setHighlightStyle(highlightStyle: str)` - sets highlight style to a new one.
 * `listAvailableHighlightStyles() -> list[str]` - returns list of available highlight styles.
 * `setEnableSyntaxHighlighting(enableSyntaxHighlighting: bool)` - enables or disables syntax highlighting.
-
 * `recordStateForUndoOperation()` - method to be used when extending `QPythonPlainTextEdit`
+
+## Adding and modifying new custom highlight styles.
+
+TBD
+
+## Changing keyboard shortcuts
+
+TBD
