@@ -7,7 +7,7 @@ from typing import NamedTuple, override
 
 import tree_sitter_python
 from PySide6 import QtCore
-from PySide6.QtGui import QKeyEvent, QPalette, Qt, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QFont, QKeyEvent, QPalette, Qt, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QPlainTextEdit, QWidget
 from tree_sitter import Language, Node, Parser, Point, Query, QueryCursor
 
@@ -104,6 +104,12 @@ DEFAULT_ACTION_TRIGGERS: dict[str, ActionTrigger] = {
     ),
     "duplicate_line": ActionTrigger((Qt.Key.Key_D,), (QtCore.Qt.KeyboardModifier.ControlModifier,)),
     "toggle_comment_block": ActionTrigger((Qt.Key.Key_Slash,), (QtCore.Qt.KeyboardModifier.ControlModifier,)),
+    "increase_font_size": ActionTrigger(
+        (Qt.Key.Key_Plus,), (QtCore.Qt.KeyboardModifier.ControlModifier, QtCore.Qt.KeyboardModifier.ShiftModifier)
+    ),
+    "decrease_font_size": ActionTrigger(
+        (Qt.Key.Key_Underscore,), (QtCore.Qt.KeyboardModifier.ControlModifier, QtCore.Qt.KeyboardModifier.ShiftModifier)
+    ),
 }
 
 
@@ -111,12 +117,29 @@ class QPythonPlainTextEdit(QPlainTextEdit):
     def __init__(
         self,
         parent: QWidget | None = None,
+        *,
         highlightStyle: str = "default",
         enableSyntaxHighlighting: bool = True,
         syntaxHighlightStyles: dict[str, dict[str, TextCharFormat | str]] | None = None,
         tabWidthSpaces: int = 4,
         actionTriggers: dict[str, ActionTrigger] | None = None,
+        font: QFont = QFont("Monospace"),
     ):
+        """
+        QPythonPlainTextEdit constructor. Intented to be used is for displaying or edit Python code in place
+        of QPLainTextEdit.
+
+        :param parent: QWidget parent class if any
+        :param highlightStyle: Name of a style to be picked by from `syntaxHighlightStyles`. Default is `default`.
+        :param enableSyntaxHighlighting: Enable or disable syntax highlighting. Default is True.11
+        :param syntaxHighlightStyles: dict containing highlight rules for various highlight styles. If None (default),
+            then it is resolved to `qptte.style.DEFAULT_STYLES`.
+        :param tabWidthSpaces: When Tab key is pressed it is always converted into a number of space defined by this
+            argument. Default is 4 spaces.
+        :param actionTriggers: dictionary containing keystroke definitions for all custom actions used in this class.
+            If None (default), then `DEFAULT_ACTION_TRIGGERS` is used.
+        :param font: font to be used with this widget. Default is `QFont("Monospace")`.
+        """
         super().__init__(parent)
         self.__syntax_highlighting_enabled = enableSyntaxHighlighting
         self.__working = False
@@ -139,6 +162,8 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         self.__signal_connected = False
         self.__undo_queue = deque[UndoOp](maxlen=200)
         self.__redo_queue = deque[UndoOp](maxlen=200)
+
+        self.setFont(font)
 
     def setTabWidth(self, tabWidthSpaces: int) -> None:
         """
@@ -452,6 +477,18 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                     )
 
                 self.setTextCursor(c)
+                return
+
+            if self.actionTriggers["increase_font_size"].match(event):
+                font = self.font()
+                font.setPointSize(font.pointSize() + 1)
+                self.setFont(font)
+                return
+
+            if self.actionTriggers["decrease_font_size"].match(event):
+                font = self.font()
+                font.setPointSize(font.pointSize() - 1)
+                self.setFont(font)
                 return
 
             if self.actionTriggers["undo"].match(event):

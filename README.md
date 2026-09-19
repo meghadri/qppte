@@ -12,13 +12,13 @@ This is suboptimal and could result in slowing down of the text update but is ad
 ## Adding qptte to your code
 
 ```shell
-uv add git+https://github.com/priimak/qppte.git@v0.4.0
+uv add git+https://github.com/priimak/qppte.git@v0.5.0
 ```
 
 ## Running demo GUI
 
 ```shell
-uv tool run --from git+https://github.com/priimak/qppte.git@v0.4.0 qppte_demo
+uv tool run --from git+https://github.com/priimak/qppte.git@v0.5.0 qppte_demo
 ```
 
 ## Supported additional editor operations
@@ -38,3 +38,41 @@ uv tool run --from git+https://github.com/priimak/qppte.git@v0.4.0 qppte_demo
     * `Ctrl-Shift-ArrowUp` and `Ctrl-Shift-ArrowDown` will move current line up and down respectively.
 * Toggle commenting line or block.
     * `Ctrl-/` will toggle commenting out a line or all lines included in the selected block.
+* Increment/decrement font size
+    * `Ctrl-+` will increase font size. `Ctrl+_` decrease.
+
+## Using QPythonPlainTextEdit in your code.
+
+```python
+from qppte import QPythonPlainTextEdit
+from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
+
+
+class TextEditorWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        root_panel = QWidget()
+
+        layout = QVBoxLayout()
+        root_panel.setLayout(layout)
+
+        code_editor = QPythonPlainTextEdit()
+        layout.addWidget(code_editor)
+
+        self.setCentralWidget(root_panel)
+
+        ...
+```
+
+## Methods specific to QPythonPlainTextEdit
+
+* `getTabWidth() -> int` - returns number of spaces to be used when Tab is pressed on the keyboard
+* `setTabWidth(tabWidthSpaces: int)` - sets number of spaces to be used when Tab is pressed on the keyboard. Will not
+  affect already entered text/code in the editor.
+* `getHighlightStyle() -> str` - returns current name of highlight style.
+* `setHighlightStyle(highlightStyle: str)` - sets highlight style to a new one.
+* `listAvailableHighlightStyles() -> list[str]` - returns list of available highlight styles.
+* `setEnableSyntaxHighlighting(enableSyntaxHighlighting: bool)` - enables or disables syntax highlighting.
+
+* `recordStateForUndoOperation()` - method to be used when extending `QPythonPlainTextEdit`
