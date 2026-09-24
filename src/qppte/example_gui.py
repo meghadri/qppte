@@ -74,6 +74,8 @@ def foo() -> None:
 @property(x=7)
 def moo() -> None:
     pass
+    
+a @ b    
 """
         text_edit.setPlainText(self.sample_text)
 
@@ -128,11 +130,48 @@ def pretty_print(node, input_source_bytes: bytes, indent="", show_matched_text: 
         pretty_print(child, input_source_bytes, indent + "  ")
 
 
+import os
+ENABLE_MGH_INSTRUMENTATION = os.getenv("ENABLE_MGH_INSTRUMENTATION") == "1"
+if ENABLE_MGH_INSTRUMENTATION:
+    from tree_sitter import Node, Point, QueryCursor
+    from qppte.qpythonplaintextedit import HIGHLIGHTER_QUERY, PYTHON_PARSER
+
+if ENABLE_MGH_INSTRUMENTATION:
+    def get_offset(lines: list[str], p: Point) -> int:
+        return sum([len(line) for line in lines[0 : p.row]]) + p.column + p.row
+
+def mgh_instrumentation_1(window: TextEditorWindow):
+    if ENABLE_MGH_INSTRUMENTATION:
+        # show parsed tree
+        input_lines = window.sample_text.splitlines()
+        input_text_bytes = window.sample_text.encode()
+        tree = PYTHON_PARSER.parse(input_text_bytes)
+        print("=========== PARSED TREE ===========")
+        pretty_print(tree.root_node, input_text_bytes, show_matched_text=True)
+        print("===================================")
+
+        # do query and show captured results
+        print("=========== QUERY RESULTS ===========")
+        query_cursor = QueryCursor(HIGHLIGHTER_QUERY)
+        captures = query_cursor.captures(tree.root_node)
+
+        for capture_name in captures:
+            for node in captures[capture_name]:
+                start_offset = get_offset(input_lines, node.start_point)
+                end_offset = get_offset(input_lines, node.end_point)
+                print(
+                    f"@{capture_name:20} {node.start_point.row:2}:{node.start_point.column:<2} [{window.sample_text[start_offset:end_offset]}]"
+                )
+
+
+
 def main():
     app = QApplication(sys.argv)
     window = TextEditorWindow()
+    mgh_instrumentation_1(window)
     window.show()
     sys.exit(app.exec())
+
 
 
 if __name__ == "__main__":

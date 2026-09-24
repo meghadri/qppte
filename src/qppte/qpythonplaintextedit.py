@@ -30,6 +30,7 @@ HIGHLIGHTER_QUERY = Query(
           name: (identifier) @class_definition_name)
 
         (call (identifier) @function_call)
+
         (decorator "@" (identifier)) @decorator 
         (decorator "@" (call (identifier) @decorator))  
         (decorator ("@" @decorator))
