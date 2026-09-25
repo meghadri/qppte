@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from qppte.qpythonplaintextedit import QPythonPlainTextEdit
+from qpythonplaintextedit import QPythonPlainTextEdit
 
 
 class TextEditorWindow(QMainWindow):
@@ -27,7 +27,7 @@ class TextEditorWindow(QMainWindow):
         self.setWindowTitle("QPythonPlainTextEdit Demo")
         self.setGeometry(100, 100, 800, 600)
 
-        text_edit = QPythonPlainTextEdit(highlightStyle="light_bold")
+        text_edit = QPythonPlainTextEdit(self, highlightStyle="light_bold")
 
         root_panel = QWidget()
         layout = QVBoxLayout()
@@ -127,6 +127,8 @@ def pretty_print(node, input_source_bytes: bytes, indent="", show_matched_text: 
     for child in node.children:
         pretty_print(child, input_source_bytes, indent + "  ")
 
+
+## Redirect everything to stdout
 
 def main():
     app = QApplication(sys.argv)
