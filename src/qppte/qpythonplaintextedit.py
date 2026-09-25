@@ -19,9 +19,9 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QPlainTextEdit, QWidget,  QTextEdit
 from tree_sitter import Language, Node, Parser, Point, Query, QueryCursor
 
-from style import DEFAULT_STYLES, TextCharFormat
+from qppte.style import DEFAULT_STYLES, TextCharFormat
 
-from line_number_panel import LineNumberPanel
+from qppte.line_number_panel import LineNumberPanel
 
 PY_LANGUAGE = Language(tree_sitter_python.language())
 PYTHON_PARSER = Parser(PY_LANGUAGE)
@@ -177,128 +177,69 @@ class QPythonPlainTextEdit(QPlainTextEdit):
 
         self.setup_line_mumber_panel()
 
-    ONLY_STUB_TEST_LINE_PANEL: bool = False
+    #ONLY_STUB_TEST_LINE_PANEL: bool = False
     def setup_line_mumber_panel(self) -> None:
-        if self.ONLY_STUB_TEST_LINE_PANEL is False:
-            self.lineNumberPanel = LineNumberPanel(self)
-            self.blockCountChanged.connect(self.signal_handler_block_count_changed)
-            self.updateRequest.connect(self.signal_handler_update_request)
-            self.cursorPositionChanged.connect(self.signal_handler_cursor_position_changed)
+    #    if self.ONLY_STUB_TEST_LINE_PANEL is False:
+        self.lineNumberPanel = LineNumberPanel(self)
+        self.blockCountChanged.connect(self.signal_handler_block_count_changed)
+        self.updateRequest.connect(self.signal_handler_update_request)
+        self.cursorPositionChanged.connect(self.signal_handler_cursor_position_changed)
 
-            self.signal_handler_block_count_changed(0)
+        self.signal_handler_block_count_changed(0)
 
     def calc_line_number_panel_width(self) -> int:
         """ This method has been slightly modified (use of log and uses actual
         font rather than standart.) """
-        print("QPythonPlainTextEdit.calc_line_number_panel_width()")
-        if self.ONLY_STUB_TEST_LINE_PANEL is False:
-            n_lines: int = self.blockCount()
-            n_lines_orig = n_lines
-            n_lines = max(0, n_lines)
-            digits: int = 1
-            while n_lines > 10:
-                n_lines /= 10
-                digits += 1
+#        if self.ONLY_STUB_TEST_LINE_PANEL is False:
+        n_lines: int = self.blockCount()
+        n_lines_orig = n_lines
+        n_lines = max(0, n_lines)
+        digits: int = 1
+        while n_lines > 10:
+            n_lines /= 10
+            digits += 1
 
-            width = digits * QFontMetrics(self.font()).horizontalAdvance('9') + 3
-            print(f"QPythonPlainTextEdit.calc_line_number_panel_width(): n_lines: {n_lines}, n_lines_orig = {n_lines_orig},  digits: {digits}, width: {width}")
-            return width
+        width = digits * QFontMetrics(self.font()).horizontalAdvance('9') + 3
+        print(f"QPythonPlainTextEdit.calc_line_number_panel_width(): n_lines: {n_lines}, n_lines_orig = {n_lines_orig},  digits: {digits}, width: {width}")
+        return width
 
     ####################################
     ## BEGIN: Signal Hanlder / Slots
     def signal_handler_block_count_changed(self, newBlockCount: int) -> None:
         # Update width of the line number panel
-        print(f"QPythonPlainTextEdit.signal_handler_block_count_changed: margin = {self.calc_line_number_panel_width()}, newBlockCount = {newBlockCount}, blockCount: {self.blockCount()}")
-        if self.ONLY_STUB_TEST_LINE_PANEL is False:
-            self.setViewportMargins(self.calc_line_number_panel_width(), 0, 0, 0)
+#        if self.ONLY_STUB_TEST_LINE_PANEL is False:
+        self.setViewportMargins(self.calc_line_number_panel_width(), 0, 0, 0)
 
     def signal_handler_update_request(self, rect: QtCore.QRect, dy: int) -> None:
         # Update the line number panel in response to an update in the editor
-        print('QPythonPlainTextEdit.signal_handler_update_request: rect = {}, dy = {}'.format(rect, dy))
+#        if self.ONLY_STUB_TEST_LINE_PANEL is False:
+        if dy > 0:
+            self.lineNumberPanel.scroll(0, dy)
+        else:
+            self.lineNumberPanel.update(0, rect.y(), self.lineNumberPanel.width(), rect.height())
 
-        if self.ONLY_STUB_TEST_LINE_PANEL is False:
-            if dy > 0:
-                self.lineNumberPanel.scroll(0, dy)
-            else:
-                self.lineNumberPanel.update(0, rect.y(), self.lineNumberPanel.width(), rect.height())
-
-            print('QPythonPlainTextEdit.signal_handler_update_request: rect.contains(self.viewport().rect()) = {}'.format(rect.contains(self.viewport().rect())))
-            if rect.contains(self.viewport().rect()):
-                self.signal_handler_block_count_changed(0)
+        if rect.contains(self.viewport().rect()):
+            self.signal_handler_block_count_changed(0)
 
     def signal_handler_cursor_position_changed(self) -> None:
         # Highlight the current line
-        print('QPythonPlainTextEdit.signal_handler_cursor_position_changed')
-        if self.ONLY_STUB_TEST_LINE_PANEL is False:
-            extraSelections = []
+#        if self.ONLY_STUB_TEST_LINE_PANEL is False:
+        extraSelections = []
 
-            if not self.isReadOnly():
-                selection = QTextEdit.ExtraSelection()
+        if not self.isReadOnly():
+            selection = QTextEdit.ExtraSelection()
 
-                lineColor = QColor(Qt.yellow).lighter(160)
+            lineColor = QColor(Qt.yellow).lighter(160)
 
-                selection.format.setBackground(lineColor)
-                selection.format.setProperty(QTextFormat.FullWidthSelection, True)
-                selection.cursor = self.textCursor()
-                selection.cursor.clearSelection()
-                extraSelections.append(selection)
-            self.setExtraSelections(extraSelections)
+            selection.format.setBackground(lineColor)
+            selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            extraSelections.append(selection)
+        self.setExtraSelections(extraSelections)
 
-    ## END: Signal Hanlder / Slots
+    ## END: Signal Handler / Slots
     ####################################
-
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-
-        print(f"QPythonPlainTextEdit.resizeEvent: event = {event}")
-        if self.ONLY_STUB_TEST_LINE_PANEL is False:
-            cr = self.contentsRect();
-            self.lineNumberPanel.setGeometry(QtCore.QRect(cr.left(), cr.top(), self.calc_line_number_panel_width(), cr.height()))
-
-
-    def paintEvent(self, event: QPaintEvent) -> None:
-        super(QPythonPlainTextEdit, self).paintEvent(event)
-        print(f"QPythonPlainTextEdit.paintEvent: event.rect = {event.rect()}, event.region = {event.region()}")
-        # # region Description
-        # if self.ONLY_STUB_TEST_LINE_PANEL is False:
-        #     painter = QPainter(self.lineNumberPanel)
-        #     # painter.begin(self.lineNumberPanel)
-        #     # self.line_number_area_paint_event(event, painter)
-        #     if self.ONLY_STUB_TEST_LINE_PANEL is False:
-        #         # painter = QPainter(self.lineNumberPanel)
-        #         painter.fillRect(event.rect(), Qt.lightGray)
-        #
-        #         painter.drawText(QtCore.QPoint(0, 0), "X")
-        #         block = self.firstVisibleBlock()
-        #         blockNumber = block.blockNumber()
-        #         boundingRectOfBlock: QRectF = self.blockBoundingGeometry(block)
-        #         translatedBoundingRectOfBlock: QRectF = boundingRectOfBlock.translated(self.contentOffset())
-        #         top = translatedBoundingRectOfBlock.top()
-        #         bottom = top + self.blockBoundingRect(block).height()
-        #         painter.drawText(QtCore.QPoint(top, translatedBoundingRectOfBlock.left() + 4), "Z")
-        #
-        #         # Just to make sure I use the right font
-        #         height = QFontMetrics(self.font()).height()
-        #         print(
-        #             f"QPythonPlainTextEdit.line_number_area_paint_event: block = {block}, blockNumber = {blockNumber}, top = {top}, bottom = {bottom}, height = {height}")
-        #         while block.isValid() and (top <= event.rect().bottom()):
-        #             print(
-        #                 f"QPythonPlainTextEdit.line_number_area_paint_event: block = {block}, block.isValid = {block.isValid()}, block.isVisible() = {block.isVisible()}, blockNumber = {blockNumber}, top = {top}, bottom = {bottom}, event.rect().top() = {event.rect().top()}m, event.rect().bottom() = {event.rect().bottom()},  height = {height}")
-        #             if block.isVisible() and (bottom >= event.rect().top()):
-        #                 number = str(blockNumber + 1)
-        #                 painter.setPen(Qt.black)
-        #                 painter.drawText(0, top, self.lineNumberPanel.width(), height,
-        #                                  Qt.AlignRight | Qt.AlignVCenter, number)
-        #                 print(
-        #                     f"QPythonPlainTextEdit.line_number_area_paint_event: block = {block}, block.isVisible = {block.isVisible()}, blockNumber = {blockNumber}, top = {top}, bottom = {bottom}, width = {self.lineNumberPanel.width()},  height = {height}, number = {number}")
-        #
-        #             block = block.next()
-        #             top = bottom
-        #             bottom = top + self.blockBoundingRect(block).height()
-        #             blockNumber += 1
-        #
-        #     # painter.end()
-        # # endregion
 
 
     def setTabWidth(self, tabWidthSpaces: int) -> None:
