@@ -1,9 +1,7 @@
-from PySide6 import QtCore
+from PySide6.QtCore import QRect, QRectF
+from PySide6.QtGui import QColorConstants, QFontMetrics, QPainter, QPaintEvent, QResizeEvent, Qt
 from PySide6.QtWidgets import QWidget
 
-from PySide6.QtGui import (
-    Qt, QFontMetrics, QPainter, QPaintEvent, QResizeEvent
-)
 
 class LineNumberPanel(QWidget):
     def __init__(self, editor_parent):
@@ -11,34 +9,42 @@ class LineNumberPanel(QWidget):
         self.editor_parent = editor_parent
 
     def sizeHint(self):
-        return QtCore.QSize(self.editor_parent.sizeHint())
+        return self.editor_parent.sizeHint()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
-
-#        if self.ONLY_STUB_TEST_LINE_PANEL is False:
-        cr = self.contentsRect();
-        self.setGeometry(QtCore.QRect(cr.left(), cr.top(), self.editor_parent.calc_line_number_panel_width(), cr.height()))
+        cr = self.contentsRect()
+        r: QRect = self.editor_parent.geometry()
+        r.setWidth(self.editor_parent._lineNumberPanelWidth + 13)
+        r.setLeft(cr.left() + 1)
+        r.setTop(cr.top() + 1)
+        self.setGeometry(r)
 
     def paintEvent(self, event: QPaintEvent) -> None:
-        super(LineNumberPanel, self).paintEvent(event)
-
+        super().paintEvent(event)
         painter = QPainter(self)
-        painter.fillRect(event.rect(), Qt.lightGray)
+        painter.fillRect(event.rect(), QColorConstants.White)
         block = self.editor_parent.firstVisibleBlock()
         block_number = block.blockNumber()
-        bounding_rect_of_block: QtCore.QRectF = self.editor_parent.blockBoundingGeometry(block)
-        translated_bounding_rect_of_block: QtCore.QRectF = bounding_rect_of_block.translated(self.editor_parent.contentOffset())
+        bounding_rect_of_block: QRectF = self.editor_parent.blockBoundingGeometry(block)
+        translated_bounding_rect_of_block: QRectF = bounding_rect_of_block.translated(
+            self.editor_parent.contentOffset()
+        )
         top = translated_bounding_rect_of_block.top()
         bottom = top + self.editor_parent.blockBoundingRect(block).height()
 
         height = QFontMetrics(self.font()).height()
         while block.isValid() and (top <= event.rect().bottom()):
             if block.isVisible() and (bottom >= event.rect().top()):
-                number = str(block_number + 1)
-                painter.setPen(Qt.black)
-                painter.drawText(0, top, self.width(), height,
-                                 Qt.AlignRight | Qt.AlignVCenter, number)
+                painter.setPen(QColorConstants.LightGray)
+                painter.drawText(
+                    0,
+                    int(top),
+                    self.width(),
+                    height,
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    f"{block_number + 1}  ",
+                )
             block = block.next()
             top = bottom
             bottom = top + self.editor_parent.blockBoundingRect(block).height()

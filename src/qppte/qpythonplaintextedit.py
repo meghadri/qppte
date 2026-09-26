@@ -2,26 +2,27 @@ import re
 from collections import deque
 from contextlib import suppress
 from functools import cache, reduce
-from string import digits
 from threading import Lock
 from typing import NamedTuple, override
 
-import math
-
 import tree_sitter_python
-from PySide6 import QtCore
+from PySide6 import QtCore, QtGui
 from PySide6.QtGui import (
-    QFont, QKeyEvent, QPalette, Qt,
-    QTextCharFormat, QTextCursor,
-    QTextFormat, QFontMetrics, QPainter,
-    QColor, QPaintEvent, QResizeEvent
+    QColor,
+    QFont,
+    QFontMetrics,
+    QKeyEvent,
+    QPalette,
+    Qt,
+    QTextCharFormat,
+    QTextCursor,
+    QTextFormat,
 )
-from PySide6.QtWidgets import QPlainTextEdit, QWidget,  QTextEdit
+from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
 from tree_sitter import Language, Node, Parser, Point, Query, QueryCursor
 
-from qppte.style import DEFAULT_STYLES, TextCharFormat
-
 from qppte.line_number_panel import LineNumberPanel
+from qppte.style import DEFAULT_STYLES, TextCharFormat
 
 PY_LANGUAGE = Language(tree_sitter_python.language())
 PYTHON_PARSER = Parser(PY_LANGUAGE)
@@ -129,6 +130,7 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         parent: QWidget | None = None,
         *,
         highlightStyle: str = "default",
+        enableLineNumbers: bool = False,
         enableSyntaxHighlighting: bool = True,
         syntaxHighlightStyles: dict[str, dict[str, TextCharFormat | str]] | None = None,
         tabWidthSpaces: int = 4,
@@ -141,6 +143,7 @@ class QPythonPlainTextEdit(QPlainTextEdit):
 
         :param parent: QWidget parent class if any
         :param highlightStyle: Name of a style to be picked by from `syntaxHighlightStyles`. Default is `default`.
+        :param enableLineNumbers: Indicates if we show line numbers in the editor or not. Default is `False`.
         :param enableSyntaxHighlighting: Enable or disable syntax highlighting. Default is True.11
         :param syntaxHighlightStyles: dict containing highlight rules for various highlight styles. If None (default),
             then it is resolved to `qptte.style.DEFAULT_STYLES`.
@@ -151,6 +154,7 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         :param font: font to be used with this widget. Default is `QFont("Monospace")`.
         """
         super().__init__(parent)
+        self.__line_numbers_enabled = enableLineNumbers
         self.__syntax_highlighting_enabled = enableSyntaxHighlighting
         self.__working = False
         self.__styles = DEFAULT_STYLES if syntaxHighlightStyles is None else syntaxHighlightStyles
@@ -166,6 +170,9 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         self.__highlightStyle = highlightStyle
         self.__highlightStyleDict = self.__styles[highlightStyle]
         self.__setBackground()
+        self.__current_line_background_color = QColor(
+            self.__highlightStyleDict["QPlainTextEdit_current_line_background_color"]
+        )
 
         self.__lock = Lock()
         self.__highlight_done_once = False
@@ -175,72 +182,55 @@ class QPythonPlainTextEdit(QPlainTextEdit):
 
         self.setFont(font)
 
-        self.setup_line_mumber_panel()
+        self.__lineNumberPanel = LineNumberPanel(self) if enableLineNumbers else None
+        self.__lineNumberPanelConnections = self.__configure_line_numbers_panel() if enableLineNumbers else []
+        self._lineNumberPanelWidth = self.calc_line_number_panel_width()
 
-    #ONLY_STUB_TEST_LINE_PANEL: bool = False
-    def setup_line_mumber_panel(self) -> None:
-    #    if self.ONLY_STUB_TEST_LINE_PANEL is False:
-        self.lineNumberPanel = LineNumberPanel(self)
-        self.blockCountChanged.connect(self.signal_handler_block_count_changed)
-        self.updateRequest.connect(self.signal_handler_update_request)
-        self.cursorPositionChanged.connect(self.signal_handler_cursor_position_changed)
+    def __configure_line_numbers_panel(self) -> list[QtCore.QMetaObject.Connection]:
+        c1 = self.blockCountChanged.connect(self.__signal_handler_block_count_changed)
+        c2 = self.updateRequest.connect(self.__signal_handler_update_request)
+        c3 = self.cursorPositionChanged.connect(self.__signal_handler_cursor_position_changed)
 
-        self.signal_handler_block_count_changed(0)
+        self.__signal_handler_block_count_changed(0)
+        return [c1, c2, c3]
+
+    def __unconfigure_line_numbers_panel(self) -> None:
+        self.blockCountChanged.disconnect(self.__lineNumberPanelConnections[0])
+        self.updateRequest.disconnect(self.__lineNumberPanelConnections[1])
+        self.cursorPositionChanged.disconnect(self.__lineNumberPanelConnections[2])
+        self.__lineNumberPanelConnections.clear()
+        self.__lineNumberPanel.setParent(None)
+        self.__lineNumberPanel = None
+        self.setViewportMargins(0, 0, 0, 0)
+
+    def resizeEvent(self, e: QtGui.QResizeEvent, /) -> None:
+        super().resizeEvent(e)
+        if self.__lineNumberPanel is not None:
+            self.__lineNumberPanel.resizeEvent(e)
 
     def calc_line_number_panel_width(self) -> int:
-        """ This method has been slightly modified (use of log and uses actual
-        font rather than standart.) """
-#        if self.ONLY_STUB_TEST_LINE_PANEL is False:
-        n_lines: int = self.blockCount()
-        n_lines_orig = n_lines
-        n_lines = max(0, n_lines)
-        digits: int = 1
-        while n_lines > 10:
-            n_lines /= 10
-            digits += 1
+        return len(str(self.blockCount())) * QFontMetrics(self.font()).horizontalAdvance("9")
 
-        width = digits * QFontMetrics(self.font()).horizontalAdvance('9') + 3
-        print(f"QPythonPlainTextEdit.calc_line_number_panel_width(): n_lines: {n_lines}, n_lines_orig = {n_lines_orig},  digits: {digits}, width: {width}")
-        return width
+    def __signal_handler_block_count_changed(self, newBlockCount: int) -> None:
+        self._lineNumberPanelWidth = self.calc_line_number_panel_width()
+        self.setViewportMargins(self._lineNumberPanelWidth + 20, 0, 0, 0)
 
-    ####################################
-    ## BEGIN: Signal Hanlder / Slots
-    def signal_handler_block_count_changed(self, newBlockCount: int) -> None:
-        # Update width of the line number panel
-#        if self.ONLY_STUB_TEST_LINE_PANEL is False:
-        self.setViewportMargins(self.calc_line_number_panel_width(), 0, 0, 0)
-
-    def signal_handler_update_request(self, rect: QtCore.QRect, dy: int) -> None:
+    def __signal_handler_update_request(self, rect: QtCore.QRect, dy: int) -> None:
         # Update the line number panel in response to an update in the editor
-#        if self.ONLY_STUB_TEST_LINE_PANEL is False:
         if dy > 0:
-            self.lineNumberPanel.scroll(0, dy)
+            self.__lineNumberPanel.scroll(0, dy)
         else:
-            self.lineNumberPanel.update(0, rect.y(), self.lineNumberPanel.width(), rect.height())
+            self.__lineNumberPanel.update(0, rect.y(), self.__lineNumberPanel.width(), rect.height())
 
-        if rect.contains(self.viewport().rect()):
-            self.signal_handler_block_count_changed(0)
-
-    def signal_handler_cursor_position_changed(self) -> None:
+    def __signal_handler_cursor_position_changed(self) -> None:
         # Highlight the current line
-#        if self.ONLY_STUB_TEST_LINE_PANEL is False:
-        extraSelections = []
-
         if not self.isReadOnly():
             selection = QTextEdit.ExtraSelection()
-
-            lineColor = QColor(Qt.yellow).lighter(160)
-
-            selection.format.setBackground(lineColor)
-            selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+            selection.format.setBackground(self.__current_line_background_color)
+            selection.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
             selection.cursor = self.textCursor()
             selection.cursor.clearSelection()
-            extraSelections.append(selection)
-        self.setExtraSelections(extraSelections)
-
-    ## END: Signal Handler / Slots
-    ####################################
-
+            self.setExtraSelections([selection])
 
     def setTabWidth(self, tabWidthSpaces: int) -> None:
         """
@@ -560,12 +550,15 @@ class QPythonPlainTextEdit(QPlainTextEdit):
                 font = self.font()
                 font.setPointSize(font.pointSize() + 1)
                 self.setFont(font)
+                self._lineNumberPanelWidth = self.calc_line_number_panel_width()
+                self.__signal_handler_block_count_changed(1)
                 return
 
             if self.actionTriggers["decrease_font_size"].match(event):
                 font = self.font()
                 font.setPointSize(font.pointSize() - 1)
                 self.setFont(font)
+                self._lineNumberPanelWidth = self.calc_line_number_panel_width()
                 return
 
             if self.actionTriggers["undo"].match(event):
@@ -674,10 +667,17 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         Note that this is a NO-OP if syntax highlighting is disabled
         """
         if self.__highlightStyle != highlightStyle:
+            saved_position = self.textCursor().position()
             self.__highlightStyle = highlightStyle
             self.__highlightStyleDict = self.__styles[highlightStyle]
             self.__setBackground()
+            self.__current_line_background_color = QColor(
+                self.__highlightStyleDict["QPlainTextEdit_current_line_background_color"]
+            )
             self.setPlainText(self.toPlainText())
+            cursor = self.textCursor()
+            cursor.setPosition(saved_position)
+            self.setTextCursor(cursor)
 
     def getHighlightStyle(self) -> str:
         """Returns highlight style currently in use"""
@@ -692,6 +692,19 @@ class QPythonPlainTextEdit(QPlainTextEdit):
         if self.__syntax_highlighting_enabled != enableSyntaxHighlighting:
             self.__syntax_highlighting_enabled = enableSyntaxHighlighting
             self.setPlainText(self.toPlainText())
+
+    def enableLineNumbers(self, enableLineNumbers: bool) -> None:
+        if enableLineNumbers:
+            self.__line_numbers_enabled = True
+            self.__lineNumberPanel = LineNumberPanel(self)
+            self.__lineNumberPanelConnections = self.__configure_line_numbers_panel()
+            self.__lineNumberPanel.show()
+        else:
+            self.__line_numbers_enabled = False
+            self.__unconfigure_line_numbers_panel()
+
+    def lineNumbersEnabled(self) -> bool:
+        return self.__line_numbers_enabled
 
     def listAvailableHighlightStyles(self) -> list[str]:
         """
